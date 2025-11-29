@@ -4,3 +4,4 @@ SQLAlchemy
 asyncpg
 pydantic
 python-dotenv
+aiosqlite

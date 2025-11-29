@@ -1,6 +1,9 @@
-import time
+# database/models.py
 from sqlalchemy import Column, String, Text, DateTime, func
-from .database import Base
+from sqlalchemy.orm import declarative_base
+from datetime import datetime  # ✅ Import datetime
+
+Base = declarative_base()
 
 class Room(Base):
     __tablename__ = "rooms"
@@ -10,6 +13,6 @@ class Room(Base):
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,
-        server_default=func.now(),
-        default=time.time(),
+        server_default=func.now(),  # ✅ SQLite server default
+        # Remove the Python default - let SQLite handle it
     )
