@@ -1,24 +1,15 @@
-from fastapi import APIRouter, HTTPException
+# backend/app/routers/autocomplete.py
+from fastapi import APIRouter, Request
 from pydantic import BaseModel
-from typing import List
-from services.groq_autocomplete import groq_autocomplete  # ✅ Correct name
-from database.database import get_db
-from sqlalchemy.ext.asyncio import AsyncSession
+from services.groq_autocomplete import groq_autocomplete  # ✅ CORRECT IMPORT!
 
-router = APIRouter(prefix="/autocomplete", tags=["autocomplete"])
+router = APIRouter()
 
 class AutocompleteRequest(BaseModel):
     code: str
     cursor_pos: int
 
-class Suggestion(BaseModel):
-    text: str
-    type: str
-
-@router.post("", response_model=List[Suggestion])
+@router.post("/autocomplete")
 async def autocomplete_endpoint(request: AutocompleteRequest):
-    suggestions = await groq_autocomplete.get_suggestions(  # Async!
-        request.code, 
-        request.cursor_pos
-    )
+    suggestions = await groq_autocomplete.get_suggestions(request.code, request.cursor_pos)
     return suggestions
