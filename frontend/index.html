@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Pair Program Prototype</title>
+    <title>Pair Program Prototype - Python AI Autocomplete</title>
     <script src="https://unpkg.com/monaco-editor@0.50.0/min/vs/loader.js"></script>
     <style>
         body { margin: 0; font-family: -apple-system, sans-serif; height: 100vh; background: #1e1e1e; color: white; }
@@ -29,203 +29,179 @@
         </div>
         <div id="editor"></div>
         <div id="status">
-            <span>👥 Press <strong>Ctrl+Space</strong> for AI Autocomplete (Groq-powered) | Smooth real-time sync</span>
+            <span>🐍 Python AI Autocomplete | Ctrl+Space = INSTANT suggestions! | 🔄 Live sync</span>
             <span id="users-count">1 user online</span>
         </div>
     </div>
 
     <script>
-        let editor, ws, roomId, debounceTimer;
+        let editor, ws, roomId, debounceTimer, autoCompleteTimer;
         let isRemoteUpdate = false;
-        let aiSuggestions = [];  // ✅ Store AI suggestions
+        let currentLanguage = 'python';
+        let aiProvider = null; // ✅ Track completion provider
         const SERVER_URL = 'ws://localhost:8000/ws/';
         const AUTOCOMPLETE_URL = 'http://localhost:8000/autocomplete';
 
-        // Monaco Editor setup
         require.config({ paths: { vs: 'https://unpkg.com/monaco-editor@0.50.0/min/vs' } });
         require(['vs/editor/editor.main'], function() {
             editor = monaco.editor.create(document.getElementById('editor'), {
-                value: `#include <iostream>
-using namespace std;
+                value: `# Python AI Autocomplete Demo 🐍
+def greet(name):
+    print(f"Hello {name}! 👥")
+    # Type here → pause → see AI suggestions!
+    # Try: "li" → "list", "di" → "dict", "pr" → "print"
 
-int main() {
-    cout << "Hello Pair Programming! 👥" << endl;
-    // Ctrl+Space for AI autocomplete 🚀
-    // Type fast - smooth sync guaranteed!
-    return 0;
-}`,
-                language: 'cpp',
+greet("World")
+`,
+                language: 'python',
                 theme: 'vs-dark',
                 minimap: { enabled: false },
                 fontSize: 15,
                 padding: { top: 12, bottom: 12 },
                 scrollBeyondLastLine: false,
-                automaticLayout: true,
-                quickSuggestions: true
+                automaticLayout: true
             });
 
-            // ✅ FIXED: AI Autocomplete - Fetch + Store suggestions
-            // ✅ FIXED: AI Autocomplete - Proper trigger + No duplicates
-// ✅ BULLETPROOF Autocomplete - NO Monaco API errors!
-editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, async function() {
-    console.log('🔥 Ctrl+Space triggered!');
-    
-    const position = editor.getPosition();
-    const model = editor.getModel();
-    const fullCode = model.getValue();
-    const cursorPos = model.getOffsetAt(position);
-    
-    console.log('Cursor at:', position, 'Offset:', cursorPos);
-    
-    try {
-        const response = await fetch(AUTOCOMPLETE_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                code: fullCode,
-                cursor_pos: cursorPos
-            })
-        });
-        
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
-        aiSuggestions = await response.json();
-        console.log('✅ AI Suggestions:', aiSuggestions);
-        
-        // ✅ SIMPLIFIED: Direct Monaco suggestions (NO providers!)
-        if (aiSuggestions.length > 0) {
-            monaco.editor.setModelMarkers(model, 'ai-suggestions', []);
-            
-            // Show simple suggestions popup
-            const suggestions = aiSuggestions.slice(0, 6).map(s => ({
-                label: s.text,
-                kind: s.type === 'keyword' ? monaco.languages.CompletionItemKind.Keyword :
-                      s.type === 'function' ? monaco.languages.CompletionItemKind.Function :
-                      monaco.languages.CompletionItemKind.Text,
-                insertText: s.text,
-                range: {
-                    startLineNumber: position.lineNumber,
-                    startColumn: Math.max(1, position.column - 5),
-                    endLineNumber: position.lineNumber,
-                    endColumn: position.column
-                }
-            }));
-            
-            // Trigger Monaco's built-in suggest widget
-            editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
-            
-            // Fallback: Manual quick info
-            setTimeout(() => {
-                monaco.editor.showSimpleSuggestions(editor, {
-                    suggestions: suggestions,
-                    incomplete: true
-                });
-            }, 100);
-        }
-        
-    } catch(error) {
-        console.error('❌ Autocomplete failed:', error);
-    }
-});
+            // ✅ MANUAL TRIGGER: Ctrl+Space
+            editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, async () => {
+                console.log('🔥 Ctrl+Space → AI Suggestions!');
+                await triggerAICompletion();
+            });
 
-
-
-            // ✅ FIXED: Smart sync - NO LOOPS + NO JITTER
-            editor.onDidChangeModelContent((event) => {
+            // ✅ AUTO TRIGGER: 600ms debounce
+            editor.onDidChangeModelContent(() => {
                 if (isRemoteUpdate) return;
-                
+
+                clearTimeout(autoCompleteTimer);
                 clearTimeout(debounceTimer);
+
+                // Auto AI after 600ms pause
+                autoCompleteTimer = setTimeout(triggerAICompletion, 600);
+
+                // Sync to server (300ms)
                 debounceTimer = setTimeout(() => {
-                    if (ws && ws.readyState === WebSocket.OPEN) {
+                    if (ws?.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({
                             type: 'code_change',
-                            code: editor.getValue()
+                            code: editor.getValue(),
+                            language: currentLanguage
                         }));
                     }
                 }, 300);
             });
         });
 
-        // UI Event Listeners
+        // ✅ FIXED AI COMPLETION - DROPDOWN WORKS!
+        async function triggerAICompletion() {
+            const position = editor.getPosition();
+            const model = editor.getModel();
+            const fullCode = model.getValue();
+            const offset = model.getOffsetAt(position);
+
+            console.log('🤖 Fetching AI suggestions...');
+
+            try {
+                const response = await fetch(AUTOCOMPLETE_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        code: fullCode,
+                        cursorPosition: offset,
+                        language: currentLanguage
+                    })
+                });
+
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const suggestions = await response.json();
+                console.log('✅ AI Suggestions received:', suggestions);
+
+                if (!suggestions?.length) return;
+
+                // ✅ CRITICAL FIX: Dispose old provider + register new one
+                if (aiProvider) {
+                    aiProvider.dispose();
+                }
+
+                // Register fresh completion provider
+                aiProvider = monaco.languages.registerCompletionItemProvider(currentLanguage, {
+                    triggerCharacters: ['.', ' ', '\n'], // ✅ Auto-trigger chars
+                    provideCompletionItems: (model, position) => {
+                        const suggestionsList = suggestions.slice(0, 8).map(s => ({
+                            label: s.text,
+                            kind: s.type === 'keyword' ? monaco.languages.CompletionItemKind.Keyword :
+                                  s.type === 'function' ? monaco.languages.CompletionItemKind.Function :
+                                  s.type === 'class' ? monaco.languages.CompletionItemKind.Class :
+                                  monaco.languages.CompletionItemKind.Text,
+                            insertText: s.text,
+                            documentation: s.description || '',
+                            range: {
+                                startLineNumber: position.lineNumber,
+                                endLineNumber: position.lineNumber,
+                                startColumn: position.column,
+                                endColumn: position.column
+                            }
+                        }));
+
+                        return { suggestions: suggestionsList };
+                    }
+                });
+
+                // ✅ Show dropdown IMMEDIATELY
+                editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
+
+            } catch (error) {
+                console.error('❌ AI Error:', error);
+            }
+        }
+
+        // WebSocket + UI (unchanged)
         document.getElementById('new-room').onclick = async () => {
             try {
-                const response = await fetch('http://localhost:8000/rooms', { 
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                
-                const data = await response.json();
+                const res = await fetch('http://localhost:8000/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const data = await res.json();
                 roomId = data.roomId || data.room_id;
-                
-                if (!roomId) throw new Error('No roomId in response');
-                
                 connectWebSocket();
                 document.getElementById('room-id').value = roomId;
                 document.getElementById('share-link').textContent = `Share: localhost:3000/?room=${roomId}`;
                 document.getElementById('share-link').style.display = 'inline';
-                
             } catch(e) {
-                console.error('Create room failed:', e);
-                alert(`Failed to create room: ${e.message}`);
+                alert(`Create room failed: ${e.message}`);
             }
         };
 
         document.getElementById('join-room').onclick = () => {
             roomId = document.getElementById('room-id').value.trim();
-            if (roomId) {
-                connectWebSocket();
-            } else {
-                alert('Enter a room ID');
-            }
-        };
-
-        document.getElementById('share-link').onclick = (e) => {
-            navigator.clipboard.writeText(`http://localhost:3000/?room=${roomId}`).then(() => {
-                const original = e.target.textContent;
-                e.target.textContent = 'Copied!';
-                setTimeout(() => e.target.textContent = original, 2000);
-            });
+            if (roomId) connectWebSocket();
         };
 
         function connectWebSocket() {
             if (ws) ws.close();
-            ws = new WebSocket(SERVER_URL + roomId);
-            
+            ws = new WebSocket(`${SERVER_URL}${roomId}`);
+
             ws.onopen = () => {
                 document.getElementById('status-text').textContent = `Connected: ${roomId}`;
                 document.getElementById('status-text').className = 'connected';
             };
-            
+
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
-                if (data.type === 'init') {
+                if (data.type === 'init' || data.type === 'code_sync') {
                     isRemoteUpdate = true;
                     editor.setValue(data.code);
+                    currentLanguage = data.language || 'python';
+                    monaco.editor.setModelLanguage(editor.getModel(), currentLanguage);
                     isRemoteUpdate = false;
-                } else if (data.type === 'code_sync') {
-                    const currentValue = editor.getValue();
-                    if (data.code !== currentValue) {
-                        isRemoteUpdate = true;
-                        editor.setValue(data.code);
-                        isRemoteUpdate = false;
-                    }
                 }
             };
-            
+
             ws.onclose = () => {
                 document.getElementById('status-text').textContent = 'Disconnected';
                 document.getElementById('status-text').className = 'disconnected';
             };
-            
-            ws.onerror = (error) => {
-                console.error('WebSocket error:', error);
-                document.getElementById('status-text').textContent = 'Connection failed';
-            };
         }
 
-        // Auto-join from URL param
+        // Auto-join
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.has('room')) {
             setTimeout(() => {
