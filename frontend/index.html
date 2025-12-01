@@ -1,23 +1,88 @@
 <!DOCTYPE html>
 <html>
+
 <head>
     <title>Pair Program Prototype - Python AI Autocomplete</title>
     <script src="https://unpkg.com/monaco-editor@0.50.0/min/vs/loader.js"></script>
     <style>
-        body { margin: 0; font-family: -apple-system, sans-serif; height: 100vh; background: #1e1e1e; color: white; }
-        #container { display: flex; flex-direction: column; height: 100vh; }
-        #header { background: #252526; padding: 10px 20px; display: flex; gap: 15px; align-items: center; }
-        #editor { flex: 1; }
-        #status { background: #2d2d30; padding: 8px 20px; font-size: 13px; display: flex; justify-content: space-between; }
-        button { background: #0e639c; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }
-        button:hover { background: #1177bb; }
-        input { padding: 8px 12px; border: 1px solid #3c3c3c; border-radius: 4px; background: #3c3c3c; color: white; flex: 1; max-width: 300px; }
-        #share-link { color: #4fc3f7; cursor: pointer; font-family: monospace; }
-        #status-text { font-weight: 500; }
-        .connected { color: #3fb950 !important; }
-        .disconnected { color: #f85149 !important; }
+        body {
+            margin: 0;
+            font-family: -apple-system, sans-serif;
+            height: 100vh;
+            background: #1e1e1e;
+            color: white;
+        }
+
+        #container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        #header {
+            background: #252526;
+            padding: 10px 20px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        #editor {
+            flex: 1;
+        }
+
+        #status {
+            background: #2d2d30;
+            padding: 8px 20px;
+            font-size: 13px;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        button {
+            background: #0e639c;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        button:hover {
+            background: #1177bb;
+        }
+
+        input {
+            padding: 8px 12px;
+            border: 1px solid #3c3c3c;
+            border-radius: 4px;
+            background: #3c3c3c;
+            color: white;
+            flex: 1;
+            max-width: 300px;
+        }
+
+        #share-link {
+            color: #4fc3f7;
+            cursor: pointer;
+            font-family: monospace;
+        }
+
+        #status-text {
+            font-weight: 500;
+        }
+
+        .connected {
+            color: #3fb950 !important;
+        }
+
+        .disconnected {
+            color: #f85149 !important;
+        }
     </style>
 </head>
+
 <body>
     <div id="container">
         <div id="header">
@@ -38,14 +103,18 @@
         let editor, ws, roomId, debounceTimer, autoCompleteTimer;
         let isRemoteUpdate = false;
         let currentLanguage = 'python';
-        let aiProvider = null; // ✅ Track completion provider
-        const SERVER_URL = 'ws://localhost:8000/ws/';
-        const AUTOCOMPLETE_URL = 'http://localhost:8000/autocomplete';
+        let aiProvider = null; // track completion provider
+
+        // Backend URLs - change to your Render domain, no localhost
+        const BACKEND_HOST = 'pair-program-prototype.onrender.com';
+        const SERVER_URL = `wss://${BACKEND_HOST}/ws/ws/`;
+        const AUTOCOMPLETE_URL = `https://${BACKEND_HOST}/api/autocomplete`;
+        const ROOMS_URL = `https://${BACKEND_HOST}/api/rooms`;
 
         require.config({ paths: { vs: 'https://unpkg.com/monaco-editor@0.50.0/min/vs' } });
-        require(['vs/editor/editor.main'], function() {
+        require(['vs/editor/editor.main'], function () {
             editor = monaco.editor.create(document.getElementById('editor'), {
-                value: `# Python AI Autocomplete Demo 🐍
+                value: `# Python AI Autocomplete Demo 
 def greet(name):
     print(f"Hello {name}! 👥")
     # Type here → pause → see AI suggestions!
@@ -62,23 +131,21 @@ greet("World")
                 automaticLayout: true
             });
 
-            // ✅ MANUAL TRIGGER: Ctrl+Space
+            // Ctrl+Space manual autocomplete trigger
             editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, async () => {
                 console.log('🔥 Ctrl+Space → AI Suggestions!');
                 await triggerAICompletion();
             });
 
-            // ✅ AUTO TRIGGER: 600ms debounce
+            // Auto autocomplete after 600ms pause
             editor.onDidChangeModelContent(() => {
                 if (isRemoteUpdate) return;
 
                 clearTimeout(autoCompleteTimer);
                 clearTimeout(debounceTimer);
 
-                // Auto AI after 600ms pause
                 autoCompleteTimer = setTimeout(triggerAICompletion, 600);
 
-                // Sync to server (300ms)
                 debounceTimer = setTimeout(() => {
                     if (ws?.readyState === WebSocket.OPEN) {
                         ws.send(JSON.stringify({
@@ -91,14 +158,11 @@ greet("World")
             });
         });
 
-        // ✅ FIXED AI COMPLETION - DROPDOWN WORKS!
         async function triggerAICompletion() {
             const position = editor.getPosition();
             const model = editor.getModel();
             const fullCode = model.getValue();
             const offset = model.getOffsetAt(position);
-
-            console.log('🤖 Fetching AI suggestions...');
 
             try {
                 const response = await fetch(AUTOCOMPLETE_URL, {
@@ -114,31 +178,30 @@ greet("World")
                 if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
                 const suggestions = await response.json();
-                console.log('✅ AI Suggestions received:', suggestions);
-
                 if (!suggestions?.length) return;
 
-                // ✅ CRITICAL FIX: Dispose old provider + register new one
                 if (aiProvider) {
                     aiProvider.dispose();
                 }
 
-                // Register fresh completion provider
                 aiProvider = monaco.languages.registerCompletionItemProvider(currentLanguage, {
-                    triggerCharacters: ['.', ' ', '\n'], // ✅ Auto-trigger chars
+                    triggerCharacters: ['.', ' ', '\n'],
                     provideCompletionItems: (model, position) => {
+                        const word = model.getWordUntilPosition(position);
+                        const prefixLength = word.word.length;
+
                         const suggestionsList = suggestions.slice(0, 8).map(s => ({
                             label: s.text,
                             kind: s.type === 'keyword' ? monaco.languages.CompletionItemKind.Keyword :
-                                  s.type === 'function' ? monaco.languages.CompletionItemKind.Function :
-                                  s.type === 'class' ? monaco.languages.CompletionItemKind.Class :
-                                  monaco.languages.CompletionItemKind.Text,
+                                s.type === 'function' ? monaco.languages.CompletionItemKind.Function :
+                                    s.type === 'class' ? monaco.languages.CompletionItemKind.Class :
+                                        monaco.languages.CompletionItemKind.Text,
                             insertText: s.text,
                             documentation: s.description || '',
                             range: {
                                 startLineNumber: position.lineNumber,
                                 endLineNumber: position.lineNumber,
-                                startColumn: position.column,
+                                startColumn: position.column - prefixLength,
                                 endColumn: position.column
                             }
                         }));
@@ -147,7 +210,6 @@ greet("World")
                     }
                 });
 
-                // ✅ Show dropdown IMMEDIATELY
                 editor.trigger('keyboard', 'editor.action.triggerSuggest', {});
 
             } catch (error) {
@@ -155,21 +217,25 @@ greet("World")
             }
         }
 
-        // WebSocket + UI (unchanged)
+        // Create new room and connect WebSocket
         document.getElementById('new-room').onclick = async () => {
             try {
-                const res = await fetch('http://localhost:8000/rooms', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                const res = await fetch(ROOMS_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
                 const data = await res.json();
                 roomId = data.roomId || data.room_id;
                 connectWebSocket();
                 document.getElementById('room-id').value = roomId;
-                document.getElementById('share-link').textContent = `Share: localhost:3000/?room=${roomId}`;
+                document.getElementById('share-link').textContent = `Share: ?room=${roomId}`;
                 document.getElementById('share-link').style.display = 'inline';
-            } catch(e) {
+            } catch (e) {
                 alert(`Create room failed: ${e.message}`);
             }
         };
 
+        // Join existing room
         document.getElementById('join-room').onclick = () => {
             roomId = document.getElementById('room-id').value.trim();
             if (roomId) connectWebSocket();
@@ -199,9 +265,14 @@ greet("World")
                 document.getElementById('status-text').textContent = 'Disconnected';
                 document.getElementById('status-text').className = 'disconnected';
             };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket error:', error);
+                document.getElementById('status-text').textContent = 'Connection failed';
+            };
         }
 
-        // Auto-join
+        // Auto-join room from URL param
         const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.has('room')) {
             setTimeout(() => {
@@ -210,5 +281,7 @@ greet("World")
             }, 1000);
         }
     </script>
+
 </body>
+
 </html>
